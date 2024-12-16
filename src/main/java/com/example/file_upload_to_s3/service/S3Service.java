@@ -1,15 +1,9 @@
 package com.example.file_upload_to_s3.service;
 
-import java.io.InputStream;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.IOException;
 
 public interface S3Service {
-
-    /**
-     * Uploads a file to the configured S3 bucket using an InputStream.
-     *
-     * @param fileName    the name of the file being uploaded
-     * @param inputStream the InputStream containing the file data
-     */
-    public void uploadToS3(String fileName, InputStream inputStream);
-
+    void uploadToS3(MultipartFile file) throws IOException;
 }

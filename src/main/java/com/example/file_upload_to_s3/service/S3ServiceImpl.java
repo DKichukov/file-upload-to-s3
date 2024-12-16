@@ -1,74 +1,59 @@
 package com.example.file_upload_to_s3.service;
 
+import com.example.file_upload_to_s3.exception.FileUploadException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
-import java.io.InputStream;
-import java.util.Map;
+import java.io.IOException;
+import java.util.Set;
 
 @Service
 public class S3ServiceImpl implements S3Service {
-
-    private static final long MAX_FILE_SIZE_MB = 1024 * 1024;
-
-    private static final Logger LOGGER = LoggerFactory.getLogger(S3ServiceImpl.class);
+    private static final Logger log = LoggerFactory.getLogger(S3ServiceImpl.class);
+    private static final long MAX_FILE_SIZE = 1024 * 1024; // 1MB
+    private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of("image/jpeg", "image/png");
 
     private final S3Client s3Client;
+    private final String bucketName;
 
-    @Value("${aws.s3.bucket-name}")
-    private String bucketName;
-
-
-    public S3ServiceImpl(S3Client s3Client) {
+    public S3ServiceImpl(S3Client s3Client, @Value("${aws.s3.bucket-name}") String bucketName) {
         this.s3Client = s3Client;
+        this.bucketName = bucketName;
     }
 
     @Override
-    public void uploadToS3(String fileName, InputStream inputStream) {
+    public void uploadToS3(MultipartFile file) throws IOException {
+        validateFile(file);
 
-        if (s3Client == null) {
-            LOGGER.error("S3 client is not initialized. Please check your AWS configuration.");
-            return;
-        }
-
-        try {
-            long fileSize = inputStream.available();
-            if (fileSize <= 0) {
-                LOGGER.error("Input stream is empty or null. Upload aborted.");
-                return;
-            }
-
-            if (fileSize > MAX_FILE_SIZE_MB) {
-                LOGGER.error("File size exceeds the maximum allowed limit of {} MB. Upload aborted.", MAX_FILE_SIZE_MB / (1024 * 1024));
-                return;
-            }
-
-            PutObjectRequest putObjectRequest = PutObjectRequest.builder()
+        try (var inputStream = file.getInputStream()) {
+            var putObjectRequest = PutObjectRequest.builder()
                     .bucket(bucketName)
-                    .key(fileName)
-                    .contentType("image/jpeg")
-                    .metadata(Map.of("fileName", fileName))
+                    .key(file.getOriginalFilename())
+                    .contentType(file.getContentType())
                     .build();
 
-            // Upload the file
-            s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, fileSize));
-            LOGGER.info("File uploaded successfully to S3: {}", fileName);
-
+            s3Client.putObject(putObjectRequest, RequestBody.fromInputStream(inputStream, file.getSize()));
+            log.info("File '{}' uploaded successfully to S3", file.getOriginalFilename());
         } catch (Exception e) {
-            LOGGER.error("Error uploading file to S3: ", e);
-        } finally {
-            try {
-                inputStream.close();
-            } catch (Exception e) {
-                LOGGER.warn("Failed to close input stream: ", e);
-            }
+            throw new FileUploadException("Failed to upload file to S3", e);
         }
     }
 
-
+    private void validateFile(MultipartFile file) {
+        if (file.isEmpty()) {
+            throw new FileUploadException("File is empty");
+        }
+        if (!ALLOWED_CONTENT_TYPES.contains(file.getContentType())) {
+            throw new FileUploadException("Invalid file type. Only JPEG and PNG are allowed");
+        }
+        if (file.getSize() > MAX_FILE_SIZE) {
+            throw new FileUploadException("File size exceeds the 1MB limit");
+        }
+    }
 }
